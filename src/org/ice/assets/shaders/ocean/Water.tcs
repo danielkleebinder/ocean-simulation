@@ -1,0 +1,61 @@
+#version 400
+
+// Author: Daniel Kleebinder
+// The water tessellation control shader defines all input parameters for the
+// fixed function tessellator stage. A pretty strong level of detail algorithm
+// is used in this shader.
+
+// Enable auto shader optimization (For all GPUs)
+// Not every GPU does this on its own!
+#pragma optimize(on)
+
+// Patch size of 3
+layout(vertices = 3) out;
+
+// Uniforms
+uniform vec3 m_CameraPosition;
+
+uniform float m_LevelOfDetailMinDistance;
+uniform float m_LevelOfDetailMaxDistance;
+uniform float m_LevelOfDetailChangeDistance;
+
+// Input variables from the vertex shader stage
+smooth in vec4[] v_TexCoord;
+smooth in vec4[] v_Position;
+smooth in vec4[] v_Color;
+
+// Output variables for the tessellation evaluation stage
+smooth out vec4[] c_TexCoord;
+smooth out vec4[] c_Position;
+smooth out vec4[] c_Color;
+
+/**
+ * Calculates the level of detail for the give vertex-camera distance.
+ *
+ * @param dist Distance from the camera to the vertex.
+ * @return Level of detail.
+ */
+float lod(in float dist) {
+    return clamp(round(m_LevelOfDetailChangeDistance / dist), m_LevelOfDetailMinDistance, m_LevelOfDetailMaxDistance);
+}
+
+/**
+ * Main function.
+ */
+void main(void) {
+    // Copy input to ouput variables
+    c_TexCoord[gl_InvocationID] = v_TexCoord[gl_InvocationID];
+    c_Position[gl_InvocationID] = v_Position[gl_InvocationID];
+    c_Color[gl_InvocationID] = v_Color[gl_InvocationID];
+
+    // Calculate distance to every single vertex
+    float distance0 = distance(m_CameraPosition * 0.5, c_Position[0].xyz);
+    float distance1 = distance(m_CameraPosition * 0.5, c_Position[1].xyz);
+    float distance2 = distance(m_CameraPosition * 0.5, c_Position[2].xyz);
+
+    // Store parameters for fixed function tessellator stage
+    gl_TessLevelOuter[0] = lod(distance0);
+    gl_TessLevelOuter[1] = lod(distance1);
+    gl_TessLevelOuter[2] = lod(distance2);
+    gl_TessLevelInner[0] = gl_TessLevelOuter[2];
+}

@@ -1,0 +1,65 @@
+#version 420
+
+// Work group size of 8x8x1 which means every invocation of the compute shader
+// will have to compute on a 1024x1024 texture 8x8 pixels.
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Smallest possible texture format for the displacement
+layout (rg16f) writeonly uniform image2D m_HeightFieldX;
+layout (rg16f) writeonly uniform image2D m_HeightFieldY;
+layout (rg16f) writeonly uniform image2D m_HeightFieldZ;
+
+// Pre-Computed textures
+uniform sampler2D m_SpectrumTexture;
+uniform sampler2D m_OmegaTexture;
+
+// Parameters
+uniform float m_Time;
+uniform float m_Amplitude;
+
+uniform float m_Dimension;
+
+/**
+ * Main method.
+ */
+void main() {
+    // Do Transformation
+    // Calculate pixel lookup vectors here
+    ivec2 pixcoord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 texcoord = gl_GlobalInvocationID.xy / m_Dimension;
+
+    // Pre compute K vector
+    vec2 k = texcoord - 0.5;
+
+    // 1: calculate height field Y
+    // h(0) -> h(t)
+    vec2 h0 = texture(m_SpectrumTexture, texcoord).rg * m_Amplitude;
+    vec2 conH0 = texture(m_SpectrumTexture, 1.0 - texcoord).rg * m_Amplitude;
+    float omega = texture(m_OmegaTexture, texcoord).r;
+    float stepsize = omega * m_Time;
+
+    float sinf = sin(stepsize);
+    float cosf = cos(stepsize);
+
+    vec2 ht = vec2((h0.r + conH0.r) * cosf - (h0.g + conH0.g) * sinf,
+                       (h0.r - conH0.r) * sinf + (h0.g - conH0.g) * cosf);
+
+    imageStore(m_HeightFieldY, pixcoord, vec4(ht.r, ht.g, 0.0, 1.0));
+
+    // 2: calculate choppy X-Z field
+    float squared = k.x * k.x + k.y * k.y;
+    float rSquared = 0;
+    if (squared > 1e-12) {
+        rSquared = 1.0 / sqrt(squared);
+    }
+    k *= rSquared;
+
+    vec4 choppy;
+    choppy.x = ht.y * k.x;
+    choppy.y = -ht.x * k.x;
+    choppy.z = ht.y * k.y;
+    choppy.w = -ht.x * k.y;
+
+    imageStore(m_HeightFieldX, pixcoord, vec4(choppy.xy, 0.0, 1.0));
+    imageStore(m_HeightFieldZ, pixcoord, vec4(choppy.zw, 0.0, 1.0));
+}

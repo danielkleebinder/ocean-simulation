@@ -1,0 +1,115 @@
+#version 420
+
+//Author: Daniel Kleebinder
+//A two dimensional fast fourier transformation compute shader in GLSL.
+//
+//This shader is full optimized and layed out for maximal performance. It is
+//one of the first 2D FFT compute shaders in GLSL.
+//Many pre-processor instructions are done, to optimize the performance
+//further.
+
+//Enable imageLoad() and imageStore() functions (For older GPUs)
+#extension GL_EXT_shader_image_load_store : enable
+
+//Enable auto shader optimization (For all GPUs)
+#pragma optimize(on)
+
+//These values will be set outside the shader from the CPU
+#define HORIZONTAL
+#define VERTICAL
+#define LAST_PASS
+
+//Every compute shader unit has to compute 8*8 complex fourier transformations
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#if LAST_PASS
+    layout (rgba16f) writeonly uniform image2D m_Result;
+#endif
+
+//Y Textures
+layout (rg16f) writeonly uniform image2D m_BufferTexture0;
+layout (rg16f) readonly uniform image2D m_HeightFieldY;
+
+//X-Z Choppy Textures
+layout (rgba16f) writeonly uniform image2D m_BufferTexture1;
+layout (rgba16f) readonly uniform image2D m_HeightFieldXZ;
+
+uniform sampler2D m_ButterflyTexture;
+
+uniform float m_ButterflyIndex;
+
+#if LAST_PASS
+    uniform float m_PatchSize;
+#endif
+
+uniform int m_Dimension;
+
+
+/**
+ * Computes the fast fourier transformation.
+ *
+ * @param sourceA Spectrum A.
+ * @param sourceB Spectrum B.
+ * @param weights Butterfly weights.
+ * @return Fast fourier transformed complex number.
+ */
+vec2 fft(in vec2 sourceA, in vec2 sourceB, in vec2 weights) {
+    vec2 weighted;
+    weighted.r = weights.r * sourceB.r - weights.g * sourceB.g;
+    weighted.g = weights.g * sourceB.r + weights.r * sourceB.g;
+    return sourceA + weighted;
+}
+
+/**
+ * Main method.
+ */
+void main() {
+    vec2 size = vec2(m_Dimension, m_Dimension);
+    ivec2 pixcoord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 texcoord = gl_GlobalInvocationID.xy / size;
+
+    vec4 lookup;
+    ivec2 indices, coordA, coordB;
+    #if HORIZONTAL
+        lookup = texture(m_ButterflyTexture, vec2(texcoord.x, m_ButterflyIndex));
+        indices = ivec2(lookup.rg * size);
+        coordA = ivec2(indices.x, pixcoord.y);
+        coordB = ivec2(indices.y, pixcoord.y);
+    #elif VERTICAL
+        lookup = texture(m_ButterflyTexture, vec2(texcoord.y, m_ButterflyIndex));
+        indices = ivec2(lookup.rg * size);
+        coordA = ivec2(pixcoord.x, indices.x);
+        coordB = ivec2(pixcoord.x, indices.y);
+    #endif
+
+    vec2 weights = lookup.ba;
+
+    vec4 sourceXZA = imageLoad(m_HeightFieldXZ, coordA);
+    vec4 sourceXZB = imageLoad(m_HeightFieldXZ, coordB);
+    vec2 sourceYA = imageLoad(m_HeightFieldY, coordA).rg;
+    vec2 sourceYB = imageLoad(m_HeightFieldY, coordB).rg;
+        
+    vec2 complex0 = fft(sourceXZA.rg, sourceXZB.rg, weights);
+    vec2 complex1 = fft(sourceYA, sourceYB, weights);
+    vec2 complex2 = fft(sourceXZA.ba, sourceXZB.ba, weights);
+
+    #if LAST_PASS
+        if ((pixcoord.x + pixcoord.y) % 2 == 1) {
+            complex0.r = -complex0.r;
+            complex1.r = -complex1.r;
+            complex2.r = -complex2.r;
+        }
+
+        float d = 1.0 / (m_PatchSize * (m_PatchSize * 0.01));
+
+        complex0.r *= d;
+        complex1.r *= d;
+        complex2.r *= d;
+
+        memoryBarrier();
+        imageStore(m_Result, pixcoord, vec4(complex0.r, complex1.r, complex2.r, 1.0));
+    #else
+        imageStore(m_BufferTexture1, pixcoord, vec4(complex0, complex2));
+        imageStore(m_BufferTexture0, pixcoord, vec4(complex1, 0.0, 1.0));
+    #endif
+}

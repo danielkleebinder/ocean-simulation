@@ -1,0 +1,82 @@
+#version 400
+
+// Author: Daniel Kleebinder
+// The water tessellation evaluation shader computes the interpolated values for
+// every new generated vertex.
+
+// Use the efficient perlin noise algorithm provided by the engine
+#include "org/ice/assets/shaders/libraries/PerlinNoise.glsl"
+
+// Enable auto shader optimization (For all GPUs)
+// Not every GPU does this on its own!
+#pragma optimize(on)
+
+// Output:
+//   - Geometry as triangles
+//   - Use equal-spacing
+//   - In counter clock wise direction
+layout(triangles, equal_spacing, ccw) in;
+
+//Uniforms
+uniform mat4 m_ModelViewProjectionMatrix;
+
+uniform sampler2D m_DisplacementMap;
+
+uniform vec2 m_PerlinNoiseScale;
+uniform vec2 m_ChoppyScale;
+
+uniform float m_PerlinNoiseHeight;
+uniform float m_PerlinNoiseAnimationSpeed;
+uniform float m_Time;
+
+// Input variables from the fixed function tessellator stage
+smooth in vec4[] c_TexCoord;
+smooth in vec4[] c_Position;
+smooth in vec4[] c_Color;
+
+// Interpolated output variables
+// Normals will be read from the normals texture in fragment shader stage
+smooth out vec4 e_TexCoord;
+smooth out vec4 e_Position;
+smooth out vec4 e_Color;
+
+/**
+ * Interpolates the given edge vertices and generates a new one.
+ *
+ * @param v0 First edge vertex.
+ * @param v1 Second edge vertex.
+ * @param v2 Third edge vertex.
+ * @return Interpolated vec3 value.
+ */
+vec3 interpolate(vec3 v0, vec3 v1, vec3 v2) {
+    return vec3(gl_TessCoord.x) * v0 + vec3(gl_TessCoord.y) * v1 + vec3(gl_TessCoord.z) * v2;
+}
+
+/**
+ * Interpolates the given edge vertices and generates a new one.
+ *
+ * @param v0 First edge vertex.
+ * @param v1 Second edge vertex.
+ * @param v2 Third edge vertex.
+ * @return Interpolated vec4 value.
+ */
+vec4 interpolate(vec4 v0, vec4 v1, vec4 v2) {
+    return vec4(gl_TessCoord.x) * v0 + vec4(gl_TessCoord.y) * v1 + vec4(gl_TessCoord.z) * v2;
+}
+
+/**
+ * Main function.
+ */
+void main(void) {
+    // Interpolate all input data
+    e_TexCoord = interpolate(c_TexCoord[0], c_TexCoord[1], c_TexCoord[2]);
+    e_Position = interpolate(c_Position[0], c_Position[1], c_Position[2]);
+    e_Color = interpolate(c_Color[0], c_Color[1], c_Color[2]);
+    
+    e_Position = vec4(vec3(e_Position.x, 0.0, e_Position.z)
+                      + vec3(e_Position.x, noise((e_Position.xz + m_Time * m_PerlinNoiseAnimationSpeed) * m_PerlinNoiseScale) * m_PerlinNoiseHeight, e_Position.z)
+                      + texture(m_DisplacementMap, e_TexCoord.st).xyz * vec3(m_ChoppyScale.x, 1.0, m_ChoppyScale.y), 1.0);
+
+    // Create screen spaced output vertex coordinate
+    gl_Position = m_ModelViewProjectionMatrix * e_Position;
+}

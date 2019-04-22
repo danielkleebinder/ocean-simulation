@@ -1,0 +1,53 @@
+#version 420
+
+// Author: Daniel Kleebinder
+// Calculates the normal map from the given displacement map
+
+// Enable imageLoad() and imageStore() functions (For older GPUs)
+#extension GL_EXT_shader_image_load_store : enable
+
+// Enable auto shader optimization (For all GPUs)
+// Not every GPU does this on its own!
+#pragma optimize(on)
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout (rgba16f) readonly uniform image2D m_DisplacementMap;
+layout (rgba16f) writeonly uniform image2D m_NormalsFoldingMap;
+
+uniform vec2 m_ChoppyScale;
+uniform float m_DistanceBetweenVertex;
+
+void main(void) {
+    ivec2 pixcoord = ivec2(gl_GlobalInvocationID.xy);
+    vec3 choppyscale = vec3(m_ChoppyScale.x, 1.0, m_ChoppyScale.y);
+
+    // Lookup displacements
+    vec3 d0 = imageLoad(m_DisplacementMap, pixcoord).xyz;
+    vec3 dl = imageLoad(m_DisplacementMap, pixcoord + ivec2(-1, +0)).xyz;
+    vec3 dr = imageLoad(m_DisplacementMap, pixcoord + ivec2(+1, +0)).xyz;
+    vec3 db = imageLoad(m_DisplacementMap, pixcoord + ivec2(+0, -1)).xyz;
+    vec3 df = imageLoad(m_DisplacementMap, pixcoord + ivec2(+0, +1)).xyz;
+
+    // Calculate Normals
+    vec3 s00 = d0 * choppyscale;
+    vec3 s10 = vec3(m_DistanceBetweenVertex, 0.0, 0.0) + dr * choppyscale;
+    vec3 s01 = vec3(0.0, 0.0, m_DistanceBetweenVertex) + df * choppyscale;
+    vec3 normal = normalize(cross(s01 - s00, s10 - s00));
+
+    // Calculate Folding
+    vec2 dx = (dr.xz - dl.xz) * m_ChoppyScale;
+    vec2 dy = (df.xz - db.xz) * m_ChoppyScale;
+    float j = (1.0 + dx.x) * (1.0 + dy.y) - dx.y * dy.x;
+    float fold = max(1.0 - j, 0.0);
+
+    // Prevent out of bounds lookups
+    if ((pixcoord.x / 512.0) >= 0.99 || (pixcoord.y / 512.0) >= 0.99
+        || (pixcoord.x / 512.0) <= 0.01 || (pixcoord.y / 512.0) <= 0.01) {
+        fold = 0.0;
+    }
+
+    // Write values
+    memoryBarrier();
+    imageStore(m_NormalsFoldingMap, pixcoord, vec4(normal, fold));
+}
