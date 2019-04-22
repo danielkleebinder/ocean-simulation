@@ -4,6 +4,7 @@ An algorithm developed by Jerry Tessendorf implemented and ported to OpenGL, GLS
 
 ## Rendering Pipeline
 The following rendering pipeline was implemented in GLSL to create the normals- and folding-map from a phillips-spectrum using the inverse fast fourier transformation.
+
 ![Simulation Pipeline](https://github.com/danielkleebinder/ocean-simulation/blob/master/imgs/Simulation.png?raw=true)
 
 ## Results
